@@ -220,7 +220,7 @@ A: **No.** FocusLog is 100% offline. All data is stored locally in your `%LOCALA
 
 **Q: Was AI Used in this Project?**
 
-A: **Yes**
+A: **Yes** Gemini, Claude, Deepseek, QWEN Thank you so much!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
 ---
