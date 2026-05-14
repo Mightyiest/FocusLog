@@ -8,10 +8,21 @@ import time
 import threading
 import os
 import json
+import logging
 from datetime import datetime, timedelta
 from appinfo import get_foreground_app_info
 from config import get_app_data_dir
 from secure_time import get_detector, reset_detector
+
+# Configure logging for security events
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
 
 # ── Auto-Exclusion Setup ──────────────────────────────────────────────
 
@@ -132,11 +143,17 @@ def _create_auto_excluded_if_missing():
     try:
         dirpath = os.path.dirname(AUTO_EXCLUDE_FILE)
         if dirpath:
+            # Validate directory path to prevent path traversal
+            abs_dir = os.path.abspath(dirpath)
+            app_data_dir = os.path.abspath(get_app_data_dir())
+            if not abs_dir.startswith(app_data_dir):
+                logger.error(f"Invalid auto-exclude directory path: {dirpath}")
+                return
             os.makedirs(dirpath, exist_ok=True)
         with open(AUTO_EXCLUDE_FILE, "w", encoding="utf-8") as f:
             f.write(_DEFAULT_AUTO_EXCLUDED)
-    except Exception:
-        pass
+    except OSError as e:
+        logger.warning(f"Failed to create auto-exclude file: {e}")
 
 
 def _load_auto_excluded():
@@ -146,6 +163,12 @@ def _load_auto_excluded():
     if not os.path.exists(AUTO_EXCLUDE_FILE):
         return
     try:
+        # Validate file path to prevent path traversal
+        abs_file = os.path.abspath(AUTO_EXCLUDE_FILE)
+        app_data_dir = os.path.abspath(get_app_data_dir())
+        if not abs_file.startswith(app_data_dir):
+            logger.error(f"Invalid auto-exclude file path: {AUTO_EXCLUDE_FILE}")
+            return
         with open(AUTO_EXCLUDE_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip().lower()
@@ -153,8 +176,8 @@ def _load_auto_excluded():
                     if not line.endswith(".exe"):
                         line += ".exe"
                     _AUTO_EXCLUDED_EXES.add(line)
-    except Exception:
-        pass
+    except (OSError, IOError) as e:
+        logger.warning(f"Failed to load auto-exclude file: {e}")
 
 
 def reload_auto_excluded(lock=None):
@@ -170,6 +193,12 @@ def reload_auto_excluded(lock=None):
     new_set = set()
     if os.path.exists(AUTO_EXCLUDE_FILE):
         try:
+            # Validate file path to prevent path traversal
+            abs_file = os.path.abspath(AUTO_EXCLUDE_FILE)
+            app_data_dir = os.path.abspath(get_app_data_dir())
+            if not abs_file.startswith(app_data_dir):
+                logger.error(f"Invalid auto-exclude file path during reload: {AUTO_EXCLUDE_FILE}")
+                return False
             with open(AUTO_EXCLUDE_FILE, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip().lower()
@@ -177,7 +206,8 @@ def reload_auto_excluded(lock=None):
                         if not line.endswith(".exe"):
                             line += ".exe"
                         new_set.add(line)
-        except Exception:
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to reload auto-exclude file: {e}")
             return False  # File read failed — keep existing exclusions
 
     # Swap atomically inside the lock if tracker is running
@@ -257,21 +287,33 @@ class AppTracker:
     def _load_settings(self):
         if os.path.exists(SETTINGS_FILE):
             try:
+                # Validate file path to prevent path traversal
+                abs_file = os.path.abspath(SETTINGS_FILE)
+                app_data_dir = os.path.abspath(get_app_data_dir())
+                if not abs_file.startswith(app_data_dir):
+                    logger.error(f"Invalid settings file path: {SETTINGS_FILE}")
+                    return
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.persistent_excluded = set(data.get("excluded_apps", []))
-            except Exception:
-                pass
+            except (OSError, IOError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load settings: {e}")
 
     def _save_settings(self):
         try:
             dirpath = os.path.dirname(SETTINGS_FILE)
             if dirpath:
+                # Validate directory path to prevent path traversal
+                abs_dir = os.path.abspath(dirpath)
+                app_data_dir = os.path.abspath(get_app_data_dir())
+                if not abs_dir.startswith(app_data_dir):
+                    logger.error(f"Invalid settings directory path: {dirpath}")
+                    return
                 os.makedirs(dirpath, exist_ok=True)
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump({"excluded_apps": list(self.persistent_excluded)}, f, indent=2)
-        except Exception:
-            pass
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to save settings: {e}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -336,9 +378,15 @@ class AppTracker:
         
         if os.path.exists(ACTIVE_SESSION_FILE):
             try:
-                os.remove(ACTIVE_SESSION_FILE)
-            except Exception:
-                pass
+                # Validate file path before deletion
+                abs_file = os.path.abspath(ACTIVE_SESSION_FILE)
+                app_data_dir = os.path.abspath(get_app_data_dir())
+                if not abs_file.startswith(app_data_dir):
+                    logger.error(f"Invalid active session file path: {ACTIVE_SESSION_FILE}")
+                else:
+                    os.remove(ACTIVE_SESSION_FILE)
+            except OSError as e:
+                logger.warning(f"Failed to remove active session file: {e}")
     
     def get_security_status(self):
         """Return current security/integrity status of the session."""
@@ -359,6 +407,12 @@ class AppTracker:
         if not os.path.exists(ACTIVE_SESSION_FILE):
             return False
         try:
+            # Validate file path to prevent path traversal
+            abs_file = os.path.abspath(ACTIVE_SESSION_FILE)
+            app_data_dir = os.path.abspath(get_app_data_dir())
+            if not abs_file.startswith(app_data_dir):
+                logger.error(f"Invalid active session file path: {ACTIVE_SESSION_FILE}")
+                return False
             with open(ACTIVE_SESSION_FILE, "r", encoding="utf-8") as f:
                 state = json.load(f)
                 
@@ -416,7 +470,8 @@ class AppTracker:
             self._thread = threading.Thread(target=self._poll_loop, daemon=True)
             self._thread.start()
             return True
-        except Exception:
+        except (OSError, IOError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"Failed to recover session: {e}")
             return False
 
     def load_from_report(self, filepath):
@@ -477,7 +532,8 @@ class AppTracker:
             self._thread = threading.Thread(target=self._poll_loop, daemon=True)
             self._thread.start()
             return True
-        except Exception:
+        except (OSError, IOError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"Failed to load from report: {e}")
             return False
 
     def load_crash_data(self):
