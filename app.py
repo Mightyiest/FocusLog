@@ -192,6 +192,10 @@ class FocusLogApp:
         self.clock_label = tk.Label(ctrl, text="00:00:00", bg=BG_WHITE, fg=TEXT_PRIMARY, font=(FONT_FAMILY, 32, "bold"))
         self.clock_label.grid(row=0, column=0, pady=(12, 0))
 
+        # World time label (optional display)
+        self.world_time_label = tk.Label(ctrl, text="", bg=BG_WHITE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9))
+        self.world_time_label.grid(row=0, column=1, rowspan=2, padx=(8, 12), sticky="ne")
+
         self.earnings_label = tk.Label(ctrl, text="", bg=BG_WHITE, fg=GREEN_STATUS, font=(FONT_FAMILY, 13, "bold"))
         self.earnings_label.grid(row=1, column=0, pady=(0, 4))
 
@@ -426,16 +430,19 @@ class FocusLogApp:
             report = build_report_data(temp_tracker, hourly_rate=self.hourly_rate, currency_symbol=self.currency_symbol)
             try:
                 save_to_autosave(report)
-                if os.path.exists(ACTIVE_SESSION_FILE):
+                try:
                     os.remove(ACTIVE_SESSION_FILE)
+                except OSError:
+                    pass
                 messagebox.showinfo("Session Recovered", "An interrupted session was found and saved as a recovery backup.\n\nYou can view or resume it from the Recoveries tab.")
                 self._show_session_manager()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save interrupted session: {e}")
         else:
-            if os.path.exists(ACTIVE_SESSION_FILE):
-                try: os.remove(ACTIVE_SESSION_FILE)
-                except: pass
+            try:
+                os.remove(ACTIVE_SESSION_FILE)
+            except OSError:
+                pass
 
     def _show_session_manager(self):
         win = tk.Toplevel(self.root)
@@ -553,6 +560,9 @@ class FocusLogApp:
         self.auto_save_seconds = 10
         self.currency_symbol = "$"
         self.hourly_rate = 0.0
+        self.time_format = "24"  # "12" or "24"
+        self.world_time_location = "UTC"  # Timezone identifier
+        self.show_world_time = False
         if os.path.exists(APP_SETTINGS_FILE):
             try:
                 with open(APP_SETTINGS_FILE, "r") as f:
@@ -563,6 +573,9 @@ class FocusLogApp:
                     raw_curr = data.get("currency_symbol", "$")
                     self.currency_symbol = str(raw_curr).split()[0].split('(')[0].strip() if raw_curr else "$"
                     self.hourly_rate = float(data.get("hourly_rate", 0.0))
+                    self.time_format = data.get("time_format", "24")
+                    self.world_time_location = data.get("world_time_location", "UTC")
+                    self.show_world_time = data.get("show_world_time", False)
                     self.tracker.min_track_seconds = self.min_track_seconds
                     self.tracker.save_interval = self.auto_save_seconds
             except: pass
@@ -570,9 +583,18 @@ class FocusLogApp:
     def _save_app_settings(self):
         try:
             dirpath = os.path.dirname(APP_SETTINGS_FILE)
-            if dirpath: os.makedirs(dirpath, exist_ok=True)
+            if dirpath: os.makedirs(dirpath, exist_ok=True, mode=0o700)
             with open(APP_SETTINGS_FILE, "w") as f:
-                json.dump({"confirm_on_close": self.confirm_on_close, "min_track_seconds": self.min_track_seconds, "auto_save_seconds": self.auto_save_seconds, "currency_symbol": self.currency_symbol, "hourly_rate": self.hourly_rate}, f)
+                json.dump({
+                    "confirm_on_close": self.confirm_on_close,
+                    "min_track_seconds": self.min_track_seconds,
+                    "auto_save_seconds": self.auto_save_seconds,
+                    "currency_symbol": self.currency_symbol,
+                    "hourly_rate": self.hourly_rate,
+                    "time_format": self.time_format,
+                    "world_time_location": self.world_time_location,
+                    "show_world_time": self.show_world_time
+                }, f)
         except: pass
 
     def _show_settings(self):
@@ -607,6 +629,53 @@ class FocusLogApp:
         auto_save_entry = tk.Entry(win, bg=BG_WHITE, fg=TEXT_PRIMARY, font=(FONT_FAMILY, 10), bd=0, highlightthickness=1, highlightbackground=BORDER)
         auto_save_entry.pack(fill="x", padx=14, pady=2)
         auto_save_entry.insert(0, str(self.auto_save_seconds))
+
+        # World Time Display Section
+        tk.Label(win, text="World Clock", bg=BG_SURFACE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9, "bold")).pack(anchor="w", padx=14, pady=(16, 2))
+        
+        show_time_var = tk.BooleanVar(value=self.show_world_time)
+        def _toggle_world_time():
+            self.show_world_time = show_time_var.get()
+            self._save_app_settings()
+        tk.Checkbutton(win, text="Show world clock", variable=show_time_var, bg=BG_SURFACE, activebackground=BG_SURFACE, highlightthickness=0,
+                       command=_toggle_world_time).pack(anchor="w", padx=14, pady=4)
+        
+        # Time format selection
+        time_frame = tk.Frame(win, bg=BG_SURFACE)
+        time_frame.pack(fill="x", padx=14, pady=2)
+        tk.Label(time_frame, text="Time format:", bg=BG_SURFACE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9)).pack(side="left")
+        self.time_format_var = tk.StringVar(value=self.time_format)
+        time_combo = ttk.Combobox(time_frame, textvariable=self.time_format_var, values=["12", "24"], width=8, state="readonly", font=(FONT_FAMILY, 9))
+        time_combo.pack(side="left", padx=(8, 0))
+        
+        def _save_time_format():
+            self.time_format = self.time_format_var.get()
+            self._save_app_settings()
+        time_combo.bind("<<ComboboxSelected>>", lambda e: _save_time_format())
+        
+        # Location/Timezone selection
+        location_frame = tk.Frame(win, bg=BG_SURFACE)
+        location_frame.pack(fill="x", padx=14, pady=2)
+        tk.Label(location_frame, text="Location:", bg=BG_SURFACE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9)).pack(side="left")
+        
+        # Common timezones list
+        timezone_options = [
+            "UTC",
+            "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+            "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+            "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Asia/Dubai", "Asia/Kolkata",
+            "Australia/Sydney", "Australia/Melbourne",
+            "Pacific/Auckland",
+            "America/Sao_Paulo", "America/Mexico_City"
+        ]
+        self.location_var = tk.StringVar(value=self.world_time_location)
+        location_combo = ttk.Combobox(location_frame, textvariable=self.location_var, values=timezone_options, width=25, state="readonly", font=(FONT_FAMILY, 9))
+        location_combo.pack(side="left", padx=(8, 0))
+        
+        def _save_location():
+            self.world_time_location = self.location_var.get()
+            self._save_app_settings()
+        location_combo.bind("<<ComboboxSelected>>", lambda e: _save_location())
 
         # Billing Section
         tk.Label(win, text="Billing", bg=BG_SURFACE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9, "bold")).pack(anchor="w", padx=14, pady=(16, 2))
@@ -755,6 +824,11 @@ class FocusLogApp:
         if not self.tracker.running: return
         elapsed = self.tracker.get_elapsed()
         self.clock_label.configure(text=format_duration_hms(elapsed))
+        
+        # Update world time label if enabled
+        if self.show_world_time:
+            self._update_world_time_display()
+        
         if self.hourly_rate > 0:
             counted = self.tracker.get_counted_seconds()
             earned = (counted / 3600) * self.hourly_rate
@@ -769,7 +843,35 @@ class FocusLogApp:
             current = self.tracker.get_current_app()
             self.active_label.configure(text=f"Active: {current}" if current else " ")
         self._update_ui_naming()
-        self._update_clock_id = self.root.after(250, self._tick_clock)
+        self._update_clock_id = self.root.after(1000, self._tick_clock)
+    
+    def _update_world_time_display(self):
+        """Update the world time label based on selected timezone and format."""
+        try:
+            from datetime import datetime
+            import pytz
+            
+            tz = pytz.timezone(self.world_time_location)
+            now = datetime.now(tz)
+            
+            if self.time_format == "12":
+                time_str = now.strftime("%I:%M:%S %p")
+            else:
+                time_str = now.strftime("%H:%M:%S")
+            
+            location_name = self.world_time_location.split('/')[-1].replace('_', ' ')
+            self.world_time_label.configure(text=f"🌍 {location_name}: {time_str}")
+        except Exception:
+            # Fallback to UTC if timezone not found
+            try:
+                now = datetime.utcnow()
+                if self.time_format == "12":
+                    time_str = now.strftime("%I:%M:%S %p")
+                else:
+                    time_str = now.strftime("%H:%M:%S")
+                self.world_time_label.configure(text=f"🌍 UTC: {time_str}")
+            except:
+                self.world_time_label.configure(text="")
 
     def _update_ui_naming(self):
         name = getattr(self.tracker, "session_name", "")

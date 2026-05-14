@@ -121,7 +121,7 @@ def export_json(report, filepath):
 def save_to_autosave(report):
     """Save session to autosave/ folder for crash recovery & system backup."""
     folder = os.path.join(get_app_data_dir(), "autosave")
-    os.makedirs(folder, exist_ok=True)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
     start_dt = datetime.strptime(report['date'] + " " + report['start'], "%Y-%m-%d %H:%M:%S")
     prefix = "recovery" if report.get("is_recovered") else "auto"
     filename = f"{prefix}_{start_dt.strftime('%Y-%m-%d_%H-%M-%S')}.json"
@@ -132,7 +132,7 @@ def save_to_autosave(report):
 def save_to_history(report):
     """Save session to sessions/ folder (User Manual Save)."""
     folder = os.path.join(get_app_data_dir(), "sessions")
-    os.makedirs(folder, exist_ok=True)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
     start_dt = datetime.strptime(report['date'] + " " + report['start'], "%Y-%m-%d %H:%M:%S")
     filename = f"session_{start_dt.strftime('%Y-%m-%d_%H-%M-%S')}.json"
     filepath = os.path.join(folder, filename)

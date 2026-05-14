@@ -132,10 +132,10 @@ def _create_auto_excluded_if_missing():
     try:
         dirpath = os.path.dirname(AUTO_EXCLUDE_FILE)
         if dirpath:
-            os.makedirs(dirpath, exist_ok=True)
+            os.makedirs(dirpath, mode=0o700, exist_ok=True)
         with open(AUTO_EXCLUDE_FILE, "w", encoding="utf-8") as f:
             f.write(_DEFAULT_AUTO_EXCLUDED)
-    except Exception:
+    except (IOError, OSError):
         pass
 
 
@@ -153,7 +153,7 @@ def _load_auto_excluded():
                     if not line.endswith(".exe"):
                         line += ".exe"
                     _AUTO_EXCLUDED_EXES.add(line)
-    except Exception:
+    except (IOError, OSError):
         pass
 
 
@@ -177,7 +177,7 @@ def reload_auto_excluded(lock=None):
                         if not line.endswith(".exe"):
                             line += ".exe"
                         new_set.add(line)
-        except Exception:
+        except (IOError, OSError):
             return False  # File read failed — keep existing exclusions
 
     # Swap atomically inside the lock if tracker is running
@@ -260,17 +260,17 @@ class AppTracker:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.persistent_excluded = set(data.get("excluded_apps", []))
-            except Exception:
+            except (json.JSONDecodeError, IOError, OSError):
                 pass
 
     def _save_settings(self):
         try:
             dirpath = os.path.dirname(SETTINGS_FILE)
             if dirpath:
-                os.makedirs(dirpath, exist_ok=True)
+                os.makedirs(dirpath, mode=0o700, exist_ok=True)
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump({"excluded_apps": list(self.persistent_excluded)}, f, indent=2)
-        except Exception:
+        except (IOError, OSError):
             pass
 
     # ------------------------------------------------------------------
@@ -337,7 +337,7 @@ class AppTracker:
         if os.path.exists(ACTIVE_SESSION_FILE):
             try:
                 os.remove(ACTIVE_SESSION_FILE)
-            except Exception:
+            except OSError:
                 pass
     
     def get_security_status(self):
@@ -416,7 +416,7 @@ class AppTracker:
             self._thread = threading.Thread(target=self._poll_loop, daemon=True)
             self._thread.start()
             return True
-        except Exception:
+        except (json.JSONDecodeError, IOError, OSError, KeyError, TypeError, ValueError):
             return False
 
     def load_from_report(self, filepath):
@@ -477,7 +477,7 @@ class AppTracker:
             self._thread = threading.Thread(target=self._poll_loop, daemon=True)
             self._thread.start()
             return True
-        except Exception:
+        except (json.JSONDecodeError, IOError, OSError, KeyError, TypeError, ValueError):
             return False
 
     def load_crash_data(self):
@@ -530,7 +530,7 @@ class AppTracker:
             self.session_end = datetime.fromtimestamp(os.path.getmtime(ACTIVE_SESSION_FILE))
             self.is_recovered = True
             return True
-        except Exception:
+        except (json.JSONDecodeError, IOError, OSError, KeyError, TypeError, ValueError):
             return False
 
     def toggle_pause(self):
@@ -743,6 +743,8 @@ class AppTracker:
                     self.on_update()
                     last_callback_time = now
                 except Exception:
+                    # Callback failed - log but continue tracking
+                    # Intentionally swallowing to avoid disrupting tracking loop
                     pass
 
             if now - self._last_save_time > self.save_interval:
@@ -778,5 +780,5 @@ class AppTracker:
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(state, f)
             os.replace(temp_file, ACTIVE_SESSION_FILE)
-        except Exception:
+        except (IOError, OSError, TypeError, ValueError):
             pass

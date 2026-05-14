@@ -1,1 +1,4 @@
-Nothing needs to be added to the .gitignore file since only a Python test file (`test_secure_time.py`) was added, which is a source code file that should be tracked in version control. There are no build artifacts, dependencies, temporary files, or other items that need to be ignored.
+```
+__pycache__/
+*.pyc
+```

@@ -5,5 +5,5 @@ def get_app_data_dir():
     if not base:
         base = os.path.expanduser("~")
     path = os.path.join(base, "FocusLog")
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(path, mode=0o700, exist_ok=True)
     return path

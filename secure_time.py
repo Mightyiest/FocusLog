@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import threading
+import ssl
 from datetime import datetime
 from config import get_app_data_dir
 
@@ -49,7 +50,7 @@ class TimeTamperDetector:
                 with open(TIME_CHAIN_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.chain_data = data.get("chain", [])
-            except Exception:
+            except (json.JSONDecodeError, IOError, OSError):
                 self.chain_data = []
     
     def _save_chain(self):
@@ -59,7 +60,7 @@ class TimeTamperDetector:
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump({"chain": self.chain_data}, f, indent=2)
             os.replace(temp_file, TIME_CHAIN_FILE)
-        except Exception:
+        except (IOError, OSError):
             pass
     
     def _log_security_event(self, event_type, details):
@@ -93,7 +94,7 @@ class TimeTamperDetector:
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(all_events, f, indent=2)
             os.replace(temp_file, events_file)
-        except Exception:
+        except (json.JSONDecodeError, IOError, OSError):
             pass
     
     def get_network_time(self, timeout=5):
@@ -104,13 +105,16 @@ class TimeTamperDetector:
         """
         import urllib.request
         
+        # Create SSL context with proper certificate verification
+        ssl_context = ssl.create_default_context()
+        
         for url in NTP_SOURCES:
             try:
                 req = urllib.request.Request(
                     url,
                     headers={"User-Agent": "FocusLog/1.0"}
                 )
-                with urllib.request.urlopen(req, timeout=timeout) as response:
+                with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
                     data = json.loads(response.read().decode())
                     
                     # Parse different API formats
@@ -138,7 +142,11 @@ class TimeTamperDetector:
                         offset = (system_dt - network_dt).total_seconds()
                         return offset
                         
+            except (json.JSONDecodeError, ValueError):
+                # Invalid response format from time API, try next source
+                continue
             except Exception:
+                # Network error or timeout, try next source
                 continue
         
         return None
