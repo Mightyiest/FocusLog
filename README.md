@@ -17,6 +17,11 @@ FocusLog automatically monitors your active window to track productivity, calcul
 *   **🛡️ Smart Exclusion System:**
     *   **Auto-Exclude:** Automatically ignores system processes (Explorer, Taskbar, Search, etc.) so they don't clutter your data.
     *   **Manual Exclude:** Easily exclude specific apps (e.g., Spotify, Discord) from counting toward "Work Time."
+*   **🔒 Anti-Tamper Security:** 
+    *   **Monotonic Clock Protection:** Uses unchangeable system clocks to detect time manipulation
+    *   **Network Time Sync:** Validates against trusted NTP servers to catch clock changes
+    *   **Cryptographic Hash Chaining:** Links all entries with SHA-256 hashes to prevent retroactive editing
+    *   **Trust Scoring:** Real-time integrity monitoring with tamper event logging
 *   **💾 Crash Recovery:** If the app closes unexpectedly, your session is saved to an `autosave` folder and can be recovered or viewed later.
 *   **📊 Detailed Reporting:**
     *   View live session stats.
@@ -115,10 +120,12 @@ FocusLog/
 ├── report.py           # Data formatting, export utilities (CSV/JSON/TXT)
 ├── appinfo.py          # Windows API wrappers: Get foreground window, extract icons/names
 ├── config.py           # Configuration helpers: Data directory management
+├── secure_time.py      # Anti-tamper security: Monotonic clocks, hash chaining, NTP sync
 ├── run.bat             # Quick launcher script
 ├── build.bat           # Automated PyInstaller build script
 ├── requirements.txt    # Python dependencies
-└── README.md           # This file
+├── README.md           # This file
+└── SECURITY_FEATURES.md # Detailed documentation of anti-tamper protections
 ```
 
 ---
