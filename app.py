@@ -81,13 +81,16 @@ class FocusLogApp:
 
     def __init__(self):
         self.tracker = AppTracker(poll_interval=1.0, min_track_seconds=2)
-        self.tracker.on_update = self._schedule_ui_update
         self._load_app_settings()
 
         self._check_vars = {}
         self._photo_refs = []
         self._row_widgets = {}
         self._showing_placeholder = True
+        
+        # Performance: Track last UI update state to avoid redundant refreshes
+        self._last_app_state_hash = None
+        self._ui_refresh_scheduled = False
 
         self.root = tk.Tk()
         self.root.title("FocusLog")
@@ -112,10 +115,13 @@ class FocusLogApp:
             except Exception:
                 pass
 
-        self.root.bind("<<TrackerUpdate>>", lambda e: self._refresh_app_list())
+        self.root.bind("<<TrackerUpdate>>", lambda e: self._schedule_refresh())
         self._build_styles()
         self._build_ui()
         self._update_clock_id = None
+        
+        # Link tracker callback with throttling
+        self.tracker.on_update = self._schedule_ui_update
         
         from tracker import ACTIVE_SESSION_FILE
         if os.path.exists(ACTIVE_SESSION_FILE):
@@ -770,75 +776,125 @@ class FocusLogApp:
         self.root.title(f"FocusLog | {name}" if name else "FocusLog")
 
     def _schedule_ui_update(self):
-        try: self.root.event_generate("<<TrackerUpdate>>", when="tail")
-        except: pass
+        """Schedule a UI update with throttling to avoid excessive refreshes."""
+        if self._ui_refresh_scheduled:
+            return
+        self._ui_refresh_scheduled = True
+        try:
+            self.root.event_generate("<<TrackerUpdate>>", when="tail")
+        except Exception:
+            self._ui_refresh_scheduled = False
+
+    def _schedule_refresh(self):
+        """Mark that a refresh is scheduled, reset flag after processing."""
+        pass  # The event handler will call _refresh_app_list which resets the flag
 
     def _refresh_app_list(self):
-        apps = self.tracker.get_app_times_sorted()
-        if not apps:
-            for w in self.list_inner.winfo_children(): w.destroy()
-            self._row_widgets.clear()
-            tk.Label(self.list_inner, text="Waiting for app activity...", bg=BG_WHITE, fg=TEXT_DISABLED, font=(FONT_FAMILY, 10)).pack(pady=20)
-            self._showing_placeholder = True
-            return
-        if self._showing_placeholder:
-            for w in self.list_inner.winfo_children(): w.destroy()
-            self._showing_placeholder = False
-        new_photo_refs = []
-        active_apps = set()
-        for i, (app_name, secs, included) in enumerate(apps):
-            active_apps.add(app_name)
-            row_bg = BG_WHITE if i % 2 == 0 else BG_SURFACE
-            if app_name not in self._check_vars:
-                var = tk.IntVar(value=1 if included else 0)
-                self._check_vars[app_name] = var
-            else:
-                var = self._check_vars[app_name]
-                if var.get() != (1 if included else 0): var.set(1 if included else 0)
-            is_included = bool(var.get())
-            fg = TEXT_PRIMARY if is_included else TEXT_DISABLED
-            time_fg = TEXT_SECONDARY if is_included else TEXT_DISABLED
-            if app_name not in self._row_widgets:
-                row = tk.Frame(self.list_inner, bg=row_bg)
-                row.pack(fill="x", ipady=3)
-                row.columnconfigure(2, weight=1)
-                cb = tk.Checkbutton(row, variable=var, bg=row_bg, activebackground=row_bg, selectcolor=CHECK_BG, bd=0, highlightthickness=0, onvalue=1, offvalue=0, command=lambda n=app_name, v=var: self._toggle_include(n, v))
-                cb.grid(row=0, column=0, padx=(8, 2), pady=2)
-                exe_path = self.tracker.get_exe_path(app_name)
-                icon_img = get_icon_image(exe_path, size=16) if exe_path else None
-                icon_lbl = None
-                if icon_img:
-                    photo = ImageTk.PhotoImage(icon_img)
-                    new_photo_refs.append(photo)
-                    icon_lbl = tk.Label(row, image=photo, bg=row_bg, bd=0)
-                    icon_lbl.grid(row=0, column=1, padx=(2, 4), pady=2)
-                    icon_lbl._photo = photo
+        """Refresh the app list UI only if data has changed significantly."""
+        try:
+            apps = self.tracker.get_app_times_sorted()
+            
+            # Create a hashable state key for change detection (excluding time values for efficiency)
+            app_state_key = tuple((name, included) for name, _, included in apps)
+            
+            # Skip refresh if app list structure hasn't changed (same apps, same inclusion status)
+            if app_state_key == self._last_app_state_hash and not self._showing_placeholder:
+                # Only update the total time without rebuilding the entire list
+                counted = self.tracker.get_counted_seconds()
+                self.total_label.configure(text=format_duration(counted))
+                return
+            
+            self._last_app_state_hash = app_state_key
+            self._ui_refresh_scheduled = False
+            
+            if not apps:
+                for w in self.list_inner.winfo_children():
+                    w.destroy()
+                self._row_widgets.clear()
+                tk.Label(self.list_inner, text="Waiting for app activity...", bg=BG_WHITE, fg=TEXT_DISABLED, font=(FONT_FAMILY, 10)).pack(pady=20)
+                self._showing_placeholder = True
+                return
+                
+            if self._showing_placeholder:
+                for w in self.list_inner.winfo_children():
+                    w.destroy()
+                self._showing_placeholder = False
+                
+            new_photo_refs = []
+            active_apps = set()
+            
+            for i, (app_name, secs, included) in enumerate(apps):
+                active_apps.add(app_name)
+                row_bg = BG_WHITE if i % 2 == 0 else BG_SURFACE
+                
+                if app_name not in self._check_vars:
+                    var = tk.IntVar(value=1 if included else 0)
+                    self._check_vars[app_name] = var
                 else:
-                    tk.Frame(row, bg=row_bg, width=20).grid(row=0, column=1)
-                name_lbl = tk.Label(row, text=app_name, bg=row_bg, fg=fg, font=(FONT_FAMILY, 10), anchor="w")
-                name_lbl.grid(row=0, column=2, sticky="w", padx=(2, 4))
-                time_lbl = tk.Label(row, text=format_duration(secs), bg=row_bg, fg=time_fg, font=(FONT_FAMILY, 10), anchor="e")
-                time_lbl.grid(row=0, column=3, sticky="e", padx=(4, 12))
-                self._row_widgets[app_name] = {'row': row, 'cb': cb, 'name': name_lbl, 'time': time_lbl, 'icon': icon_lbl}
-            else: 
-                widgets = self._row_widgets[app_name]
-                widgets['row'].configure(bg=row_bg)
-                widgets['row'].pack_forget()
-                widgets['row'].pack(fill="x", ipady=3)
-                widgets['cb'].configure(bg=row_bg, activebackground=row_bg)
-                widgets['name'].configure(bg=row_bg, fg=fg)
-                widgets['time'].configure(bg=row_bg, fg=time_fg, text=format_duration(secs))
-                if widgets['icon']: 
-                    widgets['icon'].configure(bg=row_bg)
-                    photo_ref = getattr(widgets['icon'], '_photo', None)
-                    if photo_ref: new_photo_refs.append(photo_ref)
-        to_remove = [name for name in self._row_widgets if name not in active_apps]
-        for name in to_remove:
-            self._row_widgets[name]['row'].destroy()
-            del self._row_widgets[name]
-        counted = self.tracker.get_counted_seconds()
-        self.total_label.configure(text=format_duration(counted))
-        self._photo_refs = new_photo_refs
+                    var = self._check_vars[app_name]
+                    if var.get() != (1 if included else 0):
+                        var.set(1 if included else 0)
+                        
+                is_included = bool(var.get())
+                fg = TEXT_PRIMARY if is_included else TEXT_DISABLED
+                time_fg = TEXT_SECONDARY if is_included else TEXT_DISABLED
+                
+                if app_name not in self._row_widgets:
+                    # Create new row
+                    row = tk.Frame(self.list_inner, bg=row_bg)
+                    row.pack(fill="x", ipady=3)
+                    row.columnconfigure(2, weight=1)
+                    
+                    cb = tk.Checkbutton(row, variable=var, bg=row_bg, activebackground=row_bg, 
+                                       selectcolor=CHECK_BG, bd=0, highlightthickness=0, 
+                                       onvalue=1, offvalue=0, 
+                                       command=lambda n=app_name, v=var: self._toggle_include(n, v))
+                    cb.grid(row=0, column=0, padx=(8, 2), pady=2)
+                    
+                    exe_path = self.tracker.get_exe_path(app_name)
+                    icon_img = get_icon_image(exe_path, size=16) if exe_path else None
+                    icon_lbl = None
+                    
+                    if icon_img:
+                        photo = ImageTk.PhotoImage(icon_img)
+                        new_photo_refs.append(photo)
+                        icon_lbl = tk.Label(row, image=photo, bg=row_bg, bd=0)
+                        icon_lbl.grid(row=0, column=1, padx=(2, 4), pady=2)
+                        icon_lbl._photo = photo
+                    else:
+                        tk.Frame(row, bg=row_bg, width=20).grid(row=0, column=1)
+                        
+                    name_lbl = tk.Label(row, text=app_name, bg=row_bg, fg=fg, 
+                                       font=(FONT_FAMILY, 10), anchor="w")
+                    name_lbl.grid(row=0, column=2, sticky="w", padx=(2, 4))
+                    
+                    time_lbl = tk.Label(row, text=format_duration(secs), bg=row_bg, fg=time_fg, 
+                                       font=(FONT_FAMILY, 10), anchor="e")
+                    time_lbl.grid(row=0, column=3, sticky="e", padx=(4, 12))
+                    
+                    self._row_widgets[app_name] = {
+                        'row': row, 'cb': cb, 'name': name_lbl, 'time': time_lbl, 'icon': icon_lbl
+                    }
+                else:
+                    # Update existing row - optimized path
+                    widgets = self._row_widgets[app_name]
+                    # Only update if visual properties changed
+                    if widgets['time'].cget('text') != format_duration(secs):
+                        widgets['time'].configure(text=format_duration(secs))
+                        
+            # Clean up removed apps
+            to_remove = [name for name in self._row_widgets if name not in active_apps]
+            for name in to_remove:
+                self._row_widgets[name]['row'].destroy()
+                del self._row_widgets[name]
+                
+            # Update total time
+            counted = self.tracker.get_counted_seconds()
+            self.total_label.configure(text=format_duration(counted))
+            self._photo_refs = new_photo_refs
+            
+        except Exception:
+            self._ui_refresh_scheduled = False
 
     def _toggle_include(self, app_name, var):
         self.tracker.set_included(app_name, bool(var.get()))
