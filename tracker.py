@@ -1,6 +1,7 @@
 """
 FocusLog — Core tracking engine.
 Monitors the active foreground window and records app usage durations.
+Includes tamper-resistant time tracking with monotonic clocks and hash chaining.
 """
 
 import time
@@ -10,6 +11,7 @@ import json
 from datetime import datetime, timedelta
 from appinfo import get_foreground_app_info
 from config import get_app_data_dir
+from secure_time import get_detector, reset_detector
 
 # ── Auto-Exclusion Setup ──────────────────────────────────────────────
 
@@ -247,6 +249,10 @@ class AppTracker:
         # Persistent Exclusions
         self.persistent_excluded = set()
         self._load_settings()
+        
+        # Security: Time tamper detection
+        self.security_detector = None
+        self.integrity_warnings = []
 
     def _load_settings(self):
         if os.path.exists(SETTINGS_FILE):
@@ -275,6 +281,12 @@ class AppTracker:
         """Begin a tracking session."""
         if self.running:
             return
+        
+        # Initialize security detector for this session
+        reset_detector()
+        self.security_detector = get_detector()
+        self.security_detector.start_session()
+        
         self.running = True
         self.paused = False
         self.session_start = datetime.now()
@@ -292,6 +304,7 @@ class AppTracker:
         self._current_start = None
         self._current_block_start = None
         self._current_block_active = 0
+        self.integrity_warnings.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
 
@@ -311,11 +324,36 @@ class AppTracker:
             self._thread.join(timeout=2)
             self._thread = None
             
+        # Finalize security detector
+        if self.security_detector:
+            security_report = self.security_detector.end_session()
+            if security_report["trust_score"] < 70:
+                self.integrity_warnings.append({
+                    "type": "LOW_TRUST_SCORE",
+                    "score": security_report["trust_score"],
+                    "events_count": security_report["tamper_events_count"]
+                })
+        
         if os.path.exists(ACTIVE_SESSION_FILE):
             try:
                 os.remove(ACTIVE_SESSION_FILE)
             except Exception:
                 pass
+    
+    def get_security_status(self):
+        """Return current security/integrity status of the session."""
+        if not self.security_detector:
+            return {"status": "NOT_STARTED", "trust_level": "UNKNOWN"}
+        
+        report = self.security_detector.get_session_report()
+        return {
+            "status": "ACTIVE" if self.running else "ENDED",
+            "trust_score": report["trust_score"],
+            "trust_level": report["trust_level"],
+            "chain_valid": report["chain_valid"],
+            "tamper_events": report["tamper_events_count"],
+            "warnings": self.integrity_warnings
+        }
 
     def recover_session(self):
         if not os.path.exists(ACTIVE_SESSION_FILE):
@@ -673,6 +711,31 @@ class AppTracker:
                         )
                         self._current_block_active += elapsed
                         self._current_start = now
+                        
+                        # Security: Validate and record with tamper detection
+                        if self.security_detector and self._current_app:
+                            validation = self.security_detector.validate_and_record(
+                                self._current_app, 
+                                elapsed
+                            )
+                            
+                            # Log integrity issues
+                            if validation["integrity_status"] == "TAMPER_DETECTED":
+                                warning = {
+                                    "type": "TIME_TAMPER_DETECTED",
+                                    "app": self._current_app,
+                                    "discrepancy": validation["discrepancy"],
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                self.integrity_warnings.append(warning)
+                            elif validation["integrity_status"] == "SUSPICIOUS":
+                                warning = {
+                                    "type": "SUSPICIOUS_TIME_CHANGE",
+                                    "app": self._current_app,
+                                    "discrepancy": validation["discrepancy"],
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                self.integrity_warnings.append(warning)
 
             # Throttled callback to reduce UI update frequency
             if should_callback and self.on_update:
