@@ -9,8 +9,20 @@ import hashlib
 import json
 import os
 import threading
+import ssl
+import logging
 from datetime import datetime
 from config import get_app_data_dir
+
+# Configure logging for security events
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
 
 # Network time API endpoints (fallback chain)
 NTP_SOURCES = [
@@ -104,13 +116,16 @@ class TimeTamperDetector:
         """
         import urllib.request
         
+        # Create SSL context with certificate verification enabled
+        ssl_context = ssl.create_default_context()
+        
         for url in NTP_SOURCES:
             try:
                 req = urllib.request.Request(
                     url,
                     headers={"User-Agent": "FocusLog/1.0"}
                 )
-                with urllib.request.urlopen(req, timeout=timeout) as response:
+                with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
                     data = json.loads(response.read().decode())
                     
                     # Parse different API formats
@@ -138,7 +153,17 @@ class TimeTamperDetector:
                         offset = (system_dt - network_dt).total_seconds()
                         return offset
                         
-            except Exception:
+            except ssl.SSLCertVerificationError as e:
+                logger.warning(f"SSL certificate verification failed for {url}: {e}")
+                continue
+            except (urllib.error.URLError, urllib.error.HTTPError) as e:
+                logger.warning(f"Network error fetching time from {url}: {e}")
+                continue
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse time response from {url}: {e}")
+                continue
+            except Exception as e:
+                logger.warning(f"Unexpected error fetching time from {url}: {e}")
                 continue
         
         return None

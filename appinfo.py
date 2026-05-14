@@ -10,7 +10,18 @@ import win32process
 import psutil
 from PIL import Image
 import os
+import logging
 from config import get_app_data_dir
+
+# Configure logging for security events
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
 
 _name_cache = {}
 _icon_cache = {}
@@ -20,21 +31,37 @@ _NAME_OVERRIDES = {}
 def _load_name_overrides():
     global _NAME_OVERRIDES
     if not os.path.exists(OVERRIDES_FILE):
-        os.makedirs(os.path.dirname(OVERRIDES_FILE), exist_ok=True)
         try:
+            override_dir = os.path.dirname(OVERRIDES_FILE)
+            if override_dir:
+                # Validate directory path to prevent path traversal
+                abs_dir = os.path.abspath(override_dir)
+                app_data_dir = os.path.abspath(get_app_data_dir())
+                if not abs_dir.startswith(app_data_dir):
+                    logger.error(f"Invalid overrides directory path: {override_dir}")
+                    return
+                os.makedirs(override_dir, exist_ok=True)
             with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
                 f.write("# Add your custom app name overrides here. Format: exename=Friendly Name\n")
                 f.write("# Example: chrome=Google Chrome\n")
-        except: pass
+        except OSError as e:
+            logger.warning(f"Failed to create name overrides file: {e}")
     else:
         try:
+            # Validate file path to prevent path traversal
+            abs_file = os.path.abspath(OVERRIDES_FILE)
+            app_data_dir = os.path.abspath(get_app_data_dir())
+            if not abs_file.startswith(app_data_dir):
+                logger.error(f"Invalid overrides file path: {OVERRIDES_FILE}")
+                return
             with open(OVERRIDES_FILE, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line and "=" in line and not line.startswith("#"):
                         k, v = line.split("=", 1)
                         _NAME_OVERRIDES[k.strip().lower()] = v.strip()
-        except: pass
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to read name overrides file: {e}")
 
 _load_name_overrides()
 
@@ -42,20 +69,25 @@ def get_foreground_app_info():
     """Return (friendly_name, exe_path) for the current foreground window."""
     try:
         hwnd = win32gui.GetForegroundWindow()
-        if not hwnd: return "[Idle]", ""
+        if not hwnd:
+            return "[Idle]", ""
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        if pid <= 0: return "[Idle]", ""
+        if pid <= 0:
+            return "[Idle]", ""
         try:
             proc = psutil.Process(pid)
             exe_path = proc.exe()
             base = proc.name()
-            if base.lower().endswith(".exe"): base = base[:-4]
+            if base.lower().endswith(".exe"):
+                base = base[:-4]
             friendly = resolve_name(exe_path, base)
             return friendly, exe_path
         except (psutil.AccessDenied, psutil.NoSuchProcess):
             title = win32gui.GetWindowText(hwnd)
             return title if title else "[Protected System App]", ""
-    except: return "[Idle]", ""
+    except Exception as e:
+        logger.warning(f"Error getting foreground app info: {e}")
+        return "[Idle]", ""
 
 def resolve_name(exe_path, base_name):
     if exe_path in _name_cache: return _name_cache[exe_path]
@@ -75,8 +107,10 @@ def _get_file_description(exe_path):
         lang, codepage = translations
         path = f'\\StringFileInfo\\{lang:04X}{codepage:04X}\\FileDescription'
         desc = win32api.GetFileVersionInfo(exe_path, path)
-        if desc and desc.strip(): return desc.strip()
-    except: pass
+        if desc and desc.strip():
+            return desc.strip()
+    except Exception as e:
+        logger.debug(f"Failed to get file description for {exe_path}: {e}")
     return None
 
 def get_icon_image(exe_path, size=16):
@@ -89,7 +123,8 @@ def get_icon_image(exe_path, size=16):
 def _extract_icon(exe_path, size=16):
     try:
         large_icons, small_icons = win32gui.ExtractIconEx(exe_path, 0, 1)
-        if not small_icons and not large_icons: return None
+        if not small_icons and not large_icons:
+            return None
         hicon = small_icons[0] if small_icons else large_icons[0]
         screen_dc = win32gui.GetDC(0)
         hdc = win32ui.CreateDCFromHandle(screen_dc)
@@ -112,13 +147,17 @@ def _extract_icon(exe_path, size=16):
         mem_dc.DeleteDC()
         win32gui.ReleaseDC(0, screen_dc)
         
-        for icon in large_icons: win32gui.DestroyIcon(icon)
-        for icon in small_icons: win32gui.DestroyIcon(icon)
+        for icon in large_icons:
+            win32gui.DestroyIcon(icon)
+        for icon in small_icons:
+            win32gui.DestroyIcon(icon)
         
         # Handle Pillow deprecation
         resampler = getattr(Image, 'Resampling', Image).LANCZOS
         return img.resize((size, size), resampler)
-    except: return None
+    except Exception as e:
+        logger.debug(f"Failed to extract icon from {exe_path}: {e}")
+        return None
 
 def get_running_applications():
     apps = set()
@@ -133,12 +172,14 @@ def get_running_applications():
                         proc = psutil.Process(pid)
                         exe_path = proc.exe()
                         base = proc.name()
-                        if base.lower().endswith(".exe"): base = base[:-4]
+                        if base.lower().endswith(".exe"):
+                            base = base[:-4]
                         friendly = resolve_name(exe_path, base)
                         if friendly and friendly != "[Idle]" and friendly not in apps:
                             apps.add(friendly)
                             results.append((friendly, exe_path))
-                except: pass
+                except Exception as e:
+                    logger.debug(f"Error enumerating window {hwnd}: {e}")
         return True
     win32gui.EnumWindows(enum_windows_proc, 0)
     return sorted(results, key=lambda x: x[0].lower())
