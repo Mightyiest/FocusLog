@@ -34,12 +34,6 @@ def _load_name_overrides():
         try:
             override_dir = os.path.dirname(OVERRIDES_FILE)
             if override_dir:
-                # Validate directory path to prevent path traversal
-                abs_dir = os.path.abspath(override_dir)
-                app_data_dir = os.path.abspath(get_app_data_dir())
-                if not abs_dir.startswith(app_data_dir):
-                    logger.error(f"Invalid overrides directory path: {override_dir}")
-                    return
                 os.makedirs(override_dir, exist_ok=True)
             with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
                 f.write("# Add your custom app name overrides here. Format: exename=Friendly Name\n")
@@ -48,12 +42,6 @@ def _load_name_overrides():
             logger.warning(f"Failed to create name overrides file: {e}")
     else:
         try:
-            # Validate file path to prevent path traversal
-            abs_file = os.path.abspath(OVERRIDES_FILE)
-            app_data_dir = os.path.abspath(get_app_data_dir())
-            if not abs_file.startswith(app_data_dir):
-                logger.error(f"Invalid overrides file path: {OVERRIDES_FILE}")
-                return
             with open(OVERRIDES_FILE, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()

@@ -4,7 +4,7 @@ FocusLog — Report generation and export utilities.
 import json
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import get_app_data_dir
 
 def format_duration(total_seconds):
@@ -71,7 +71,7 @@ def build_report_data(tracker, hourly_rate=0.0, currency_symbol="$"):
         "timeline": timeline,
         "is_recovered": getattr(tracker, 'is_recovered', False),
         "session_name": getattr(tracker, 'session_name', ""),
-        "app_exe_paths": tracker.app_exe_paths,
+        "app_exe_paths": getattr(tracker, 'app_exe_paths', {}),
         "hourly_rate": hourly_rate,
         "currency_symbol": currency_symbol,
         "total_earned": round(earned, 2),
@@ -241,7 +241,8 @@ def export_csv_history(reports_list, filepath, hourly_rate=0.0, currency_symbol=
             writer.writerow(['TOTAL COUNTED HOURS', '', '', '', '', total_counted_seconds, total_formatted, '', ''])
             if hourly_rate > 0:
                 total_earned = (total_counted_seconds / 3600) * hourly_rate
-                writer.writerow(['TOTAL EARNED', '', '', '', '', '', f"{currency_symbol}{total_earned:,.2f}", f"@ {currency_symbol}{hourly_rate:.2f}/hr", ''])
+                total_earned_display = f"{currency_symbol}{total_earned:,.2f}"
+                writer.writerow(['TOTAL EARNED', '', '', '', '', '', total_earned_display, f"@ {currency_symbol}{hourly_rate:.2f}/hr", ''])
         return True
     except Exception as e:
         print(f"CSV export error: {e}")
