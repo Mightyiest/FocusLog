@@ -8,17 +8,21 @@ import os
 import sys
 import time
 import ctypes
+import logging
 from datetime import datetime
 import json
 from PIL import ImageTk
 from tracker import AppTracker, AUTO_EXCLUDE_FILE
 from appinfo import get_icon_image, OVERRIDES_FILE
-from config import get_app_data_dir
+from config import get_app_data_dir, APP_SETTINGS_FILE
 from report import (
     format_duration, format_duration_hms, build_report_data,
     export_txt, export_json, export_csv, export_csv_history,
     save_to_autosave, save_to_history, load_session_json,
 )
+
+# Configure logger for the app module
+logger = logging.getLogger(__name__)
 
 # ── Force Windows to use Light Mode for this Tkinter app ──────────────
 # Prevents native dialogs (filedialog, messagebox) from inheriting Dark Mode
@@ -270,11 +274,15 @@ class FocusLogApp:
         auto_name = datetime.now().strftime("Session - %I:%M %p")
         self.tracker.start(session_name=auto_name) 
         for widgets in self._row_widgets.values():
-            try: widgets['row'].destroy()
-            except: pass
+            try:
+                widgets['row'].destroy()
+            except Exception as e:
+                logger.warning(f"Failed to destroy widget row: {e}")
         for w in self.list_inner.winfo_children():
-            try: w.destroy()
-            except: pass
+            try:
+                w.destroy()
+            except Exception as e:
+                logger.warning(f"Failed to destroy widget: {e}")
         self._check_vars.clear()
         self._photo_refs.clear()
         self._row_widgets.clear()
@@ -339,7 +347,7 @@ class FocusLogApp:
         win.grab_set()
         if os.path.exists(ICON_PATH):
             try: win.iconbitmap(ICON_PATH)
-            except: pass
+            except Exception: pass
 
         tk.Label(win, text="Select a running application to exclude:", bg=BG_SURFACE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9)).pack(pady=(12, 4), padx=14, anchor="w")
         list_frame = tk.Frame(win, bg=BG_WHITE, bd=0, highlightthickness=1, highlightbackground=BORDER)
@@ -435,7 +443,7 @@ class FocusLogApp:
         else:
             if os.path.exists(ACTIVE_SESSION_FILE):
                 try: os.remove(ACTIVE_SESSION_FILE)
-                except: pass
+                except Exception: pass
 
     def _show_session_manager(self):
         win = tk.Toplevel(self.root)
@@ -448,7 +456,7 @@ class FocusLogApp:
         win.transient(self.root)
         if os.path.exists(ICON_PATH):
             try: win.iconbitmap(ICON_PATH)
-            except: pass
+            except Exception: pass
 
         history_folder = os.path.join(get_app_data_dir(), "sessions")
         autosave_folder = os.path.join(get_app_data_dir(), "autosave")
@@ -555,7 +563,7 @@ class FocusLogApp:
         self.hourly_rate = 0.0
         if os.path.exists(APP_SETTINGS_FILE):
             try:
-                with open(APP_SETTINGS_FILE, "r") as f:
+                with open(APP_SETTINGS_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.confirm_on_close = data.get("confirm_on_close", True)
                     self.min_track_seconds = data.get("min_track_seconds", 2)
@@ -565,15 +573,28 @@ class FocusLogApp:
                     self.hourly_rate = float(data.get("hourly_rate", 0.0))
                     self.tracker.min_track_seconds = self.min_track_seconds
                     self.tracker.save_interval = self.auto_save_seconds
-            except: pass
+            except json.JSONDecodeError as e:
+                logger.error(f"Settings file corrupted: {e}")
+            except (IOError, OSError) as e:
+                logger.error(f"Failed to read settings: {e}")
+            except (KeyError, TypeError, ValueError) as e:
+                logger.error(f"Invalid settings format: {e}")
 
     def _save_app_settings(self):
         try:
             dirpath = os.path.dirname(APP_SETTINGS_FILE)
-            if dirpath: os.makedirs(dirpath, exist_ok=True)
-            with open(APP_SETTINGS_FILE, "w") as f:
-                json.dump({"confirm_on_close": self.confirm_on_close, "min_track_seconds": self.min_track_seconds, "auto_save_seconds": self.auto_save_seconds, "currency_symbol": self.currency_symbol, "hourly_rate": self.hourly_rate}, f)
-        except: pass
+            if dirpath:
+                os.makedirs(dirpath, exist_ok=True)
+            with open(APP_SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump({
+                    "confirm_on_close": self.confirm_on_close,
+                    "min_track_seconds": self.min_track_seconds,
+                    "auto_save_seconds": self.auto_save_seconds,
+                    "currency_symbol": self.currency_symbol,
+                    "hourly_rate": self.hourly_rate
+                }, f, indent=2)
+        except (IOError, OSError) as e:
+            logger.error(f"Failed to save settings: {e}")
 
     def _show_settings(self):
         win = tk.Toplevel(self.root)
@@ -587,7 +608,7 @@ class FocusLogApp:
         win.grab_set()
         if os.path.exists(ICON_PATH):
             try: win.iconbitmap(ICON_PATH)
-            except: pass
+            except Exception: pass
 
         tk.Label(win, text="Settings", bg=BG_SURFACE, fg=TEXT_PRIMARY, font=(FONT_FAMILY, 12, "bold")).pack(anchor="w", padx=14, pady=(12, 8))
         
@@ -919,7 +940,7 @@ class FocusLogApp:
         win.resizable(True, True)
         if os.path.exists(ICON_PATH):
             try: win.iconbitmap(ICON_PATH)
-            except: pass
+            except Exception: pass
 
         hdr = tk.Frame(win, bg=BG_WHITE, height=44)
         hdr.pack(fill="x")

@@ -4,7 +4,7 @@ FocusLog — Report generation and export utilities.
 import json
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import get_app_data_dir
 
 def format_duration(total_seconds):

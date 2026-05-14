@@ -11,7 +11,7 @@ import os
 import threading
 import ssl
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from config import get_app_data_dir
 
 # Configure logging for security events
@@ -139,7 +139,7 @@ class TimeTamperDetector:
                             dt_str = dt_str.rsplit("-", 1)[0]
                         
                         network_dt = datetime.fromisoformat(dt_str)
-                        system_dt = datetime.utcnow()
+                        system_dt = datetime.now(timezone.utc).replace(tzinfo=None)
                         offset = (system_dt - network_dt).total_seconds()
                         return offset
                     
@@ -149,7 +149,7 @@ class TimeTamperDetector:
                         if "+" in dt_str:
                             dt_str = dt_str.split("+")[0]
                         network_dt = datetime.fromisoformat(dt_str)
-                        system_dt = datetime.utcnow()
+                        system_dt = datetime.now(timezone.utc).replace(tzinfo=None)
                         offset = (system_dt - network_dt).total_seconds()
                         return offset
                         
@@ -173,12 +173,14 @@ class TimeTamperDetector:
         with self._lock:
             self.monotonic_start = time.monotonic()
             self.system_start = time.time()
+            self.network_sync_attempted = False  # Track sync status
             
             # Perform initial network sync (non-blocking)
             def sync_thread():
                 offset = self.get_network_time(timeout=3)
-                if offset is not None:
-                    with self._lock:
+                with self._lock:
+                    self.network_sync_attempted = True
+                    if offset is not None:
                         self.network_time_offset = offset
                         self.last_network_sync = time.time()
                         
@@ -191,6 +193,12 @@ class TimeTamperDetector:
                             )
                         else:
                             self.trust_score = min(100, self.trust_score + 10)
+                    else:
+                        # Log failed sync attempt for visibility
+                        self._log_security_event(
+                            "NETWORK_SYNC_FAILED",
+                            {"phase": "session_start", "sources_tried": len(NTP_SOURCES)}
+                        )
             
             thread = threading.Thread(target=sync_thread, daemon=True)
             thread.start()
@@ -204,31 +212,32 @@ class TimeTamperDetector:
     
     def _add_to_chain(self, event_type, data):
         """Add an entry to the cryptographic hash chain."""
-        previous_hash = self.chain_data[-1]["hash"] if self.chain_data else "GENESIS"
-        
-        entry_data = {
-            "event_type": event_type,
-            "data": data,
-            "previous_hash": previous_hash,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Create hash of this entry
-        entry_json = json.dumps(entry_data, sort_keys=True)
-        entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
-        
-        entry = {
-            **entry_data,
-            "hash": entry_hash
-        }
-        
-        self.chain_data.append(entry)
-        
-        # Periodically save chain (every 10 entries)
-        if len(self.chain_data) % 10 == 0:
-            self._save_chain()
-        
-        return entry_hash
+        with self._lock:
+            previous_hash = self.chain_data[-1]["hash"] if self.chain_data else "GENESIS"
+            
+            entry_data = {
+                "event_type": event_type,
+                "data": data,
+                "previous_hash": previous_hash,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Create hash of this entry
+            entry_json = json.dumps(entry_data, sort_keys=True)
+            entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
+            
+            entry = {
+                **entry_data,
+                "hash": entry_hash
+            }
+            
+            self.chain_data.append(entry)
+            
+            # Periodically save chain (every 10 entries) - now inside lock for thread safety
+            if len(self.chain_data) % 10 == 0:
+                self._save_chain()
+            
+            return entry_hash
     
     def validate_and_record(self, app_name, duration_seconds):
         """
