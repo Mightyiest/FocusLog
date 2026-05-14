@@ -26,7 +26,6 @@ if not logger.handlers:
 
 # Network time API endpoints (fallback chain)
 NTP_SOURCES = [
-    "https://worldtimeapi.org/api/ip",
     "https://timeapi.io/api/time/current/zone?timeZone=UTC",
 ]
 
