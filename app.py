@@ -188,13 +188,14 @@ class FocusLogApp:
         ctrl = tk.Frame(main, bg=BG_WHITE)
         ctrl.grid(row=2, column=0, sticky="ew", padx=12, pady=(10, 6))
         ctrl.columnconfigure(0, weight=1)
+        ctrl.columnconfigure(1, weight=0)  # World time column doesn't expand
 
         self.clock_label = tk.Label(ctrl, text="00:00:00", bg=BG_WHITE, fg=TEXT_PRIMARY, font=(FONT_FAMILY, 32, "bold"))
-        self.clock_label.grid(row=0, column=0, pady=(12, 0))
+        self.clock_label.grid(row=0, column=0, pady=(12, 0), sticky="w")
 
         # World time label (optional display)
         self.world_time_label = tk.Label(ctrl, text="", bg=BG_WHITE, fg=TEXT_SECONDARY, font=(FONT_FAMILY, 9))
-        self.world_time_label.grid(row=0, column=1, rowspan=2, padx=(8, 12), sticky="ne")
+        self.world_time_label.grid(row=0, column=1, rowspan=2, padx=(8, 12), pady=(12, 0), sticky="e")
 
         self.earnings_label = tk.Label(ctrl, text="", bg=BG_WHITE, fg=GREEN_STATUS, font=(FONT_FAMILY, 13, "bold"))
         self.earnings_label.grid(row=1, column=0, pady=(0, 4))
