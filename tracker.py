@@ -621,6 +621,10 @@ class AppTracker:
             self._flush_current_unlocked(time.time())
 
     def _poll_loop(self):
+        """Main tracking loop - optimized to reduce callback overhead."""
+        last_callback_time = 0
+        callback_interval = 0.5  # Only trigger UI update every 500ms max
+        
         while self.running:
             if self.paused:
                 time.sleep(self.poll_interval)
@@ -635,6 +639,8 @@ class AppTracker:
             if _is_auto_excluded(exe_path):
                 app = self._current_app
 
+            should_callback = (now - last_callback_time) >= callback_interval
+            
             with self._lock:
                 if app != self._current_app:
                     self._flush_current_unlocked(now)
@@ -650,6 +656,9 @@ class AppTracker:
                             self.app_included[app] = False
                         else:
                             self.app_included[app] = (app != "[Idle]")
+                    
+                    # Always callback on app switch for immediate UI response
+                    should_callback = True
                 else:
                     if self._current_app and self._current_start:
                         elapsed = now - self._current_start
@@ -665,9 +674,11 @@ class AppTracker:
                         self._current_block_active += elapsed
                         self._current_start = now
 
-            if self.on_update:
+            # Throttled callback to reduce UI update frequency
+            if should_callback and self.on_update:
                 try:
                     self.on_update()
+                    last_callback_time = now
                 except Exception:
                     pass
 
