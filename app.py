@@ -14,6 +14,7 @@ from PIL import ImageTk
 from tracker import AppTracker, AUTO_EXCLUDE_FILE
 from appinfo import get_icon_image, OVERRIDES_FILE
 from config import get_app_data_dir
+from secure_time import get_detector
 from report import (
     format_duration, format_duration_hms, build_report_data,
     export_txt, export_json, export_csv, export_csv_history,

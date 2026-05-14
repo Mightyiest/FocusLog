@@ -133,6 +133,7 @@ AUTO_EXCLUDE_FILE = os.path.join(get_app_data_dir(), "auto_excluded_apps.txt")
 ACTIVE_SESSION_FILE = os.path.join(get_app_data_dir(), "active_session.json")
 
 _AUTO_EXCLUDED_EXES = set()  # must be declared before any function references it
+_AUTO_EXCLUDED_LOCK = threading.Lock()  # thread-safe access to _AUTO_EXCLUDED_EXES
 
 
 def _create_auto_excluded_if_missing():
@@ -210,11 +211,8 @@ def reload_auto_excluded(lock=None):
             logger.warning(f"Failed to reload auto-exclude file: {e}")
             return False  # File read failed — keep existing exclusions
 
-    # Swap atomically inside the lock if tracker is running
-    if lock is not None:
-        with lock:
-            _AUTO_EXCLUDED_EXES = new_set
-    else:
+    # Swap atomically using module-level lock
+    with _AUTO_EXCLUDED_LOCK:
         _AUTO_EXCLUDED_EXES = new_set
 
     return True  # Success
@@ -224,8 +222,9 @@ def _is_auto_excluded(exe_path):
     """Return True if this exe should be completely ignored by the tracker."""
     if exe_path:
         exe_name = os.path.basename(exe_path).lower()
-        if exe_name in _AUTO_EXCLUDED_EXES:
-            return True
+        with _AUTO_EXCLUDED_LOCK:
+            if exe_name in _AUTO_EXCLUDED_EXES:
+                return True
     return False
 
 
@@ -585,6 +584,9 @@ class AppTracker:
             
             self.session_end = datetime.fromtimestamp(os.path.getmtime(ACTIVE_SESSION_FILE))
             self.is_recovered = True
+            
+            # Initialize security detector for recovered session
+            self.security_detector = get_detector()
             return True
         except Exception:
             return False
