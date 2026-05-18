@@ -787,8 +787,8 @@ class FocusLogApp:
             self._ui_refresh_scheduled = False
 
     def _schedule_refresh(self):
-        """Mark that a refresh is scheduled, reset flag after processing."""
-        pass  # The event handler will call _refresh_app_list which resets the flag
+        """Called by the <<TrackerUpdate>> virtual event — triggers the actual UI refresh."""
+        self._refresh_app_list()
 
     def _refresh_app_list(self):
         """Refresh the app list UI only if data has changed significantly."""
@@ -803,6 +803,7 @@ class FocusLogApp:
                 # Only update the total time without rebuilding the entire list
                 counted = self.tracker.get_counted_seconds()
                 self.total_label.configure(text=format_duration(counted))
+                self._ui_refresh_scheduled = False
                 return
             
             self._last_app_state_hash = app_state_key
